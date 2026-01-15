@@ -1,19 +1,10 @@
 import type { Point, PoseData, PhysicsBody, PhysicsParticle, Skeleton, PhysicsConstraint } from './types';
-import { computeSkeleton, hierarchy, W, H, WAIST_HEIGHT, L_THIGH, L_SHIN } from './kinematics';
+import { computeSkeleton, hierarchy, W, H, GROUND_Y } from './kinematics';
 
 // --- Simulation Constants ---
-const GRAVITY: Point = { x: 0, y: 9.8 * 100 }; // Scaled for pixels
-const FRICTION = 0.99;
-const GROUND_FRICTION = 0.85;
+const FRICTION = 0.995; // A slight air damping to prevent chaotic runaway motion
 const SOLVER_ITERATIONS = 10;
-const GROUND_PLANE_Y = H - 40;
-const STIFFNESS = 0.6; // Proportional gain for the PD controller
-const DAMPING = 0.4;    // Derivative gain for the PD controller
-
-// --- NEW: Grounded Balance Constants ---
-const BALANCE_STIFFNESS = 150; // How strongly the puppet tries to balance over its feet.
-const BALANCE_DAMPING = 20;    // Prevents wobbling by damping the balance correction.
-
+const BOUNCE_FACTOR = 0.7; // Energy retained after bouncing off a wall
 
 /**
  * Creates a physics body (particles and constraints) from a static pose.
@@ -69,72 +60,20 @@ export function createPhysicsBodyFromPose(pose: PoseData): PhysicsBody {
 }
 
 /**
- * Calculates the center of mass for the entire physics body.
- */
-function calculateCenterOfMass(body: PhysicsBody): Point {
-    let totalMass = 0;
-    const com = { x: 0, y: 0 };
-    body.particles.forEach(p => {
-        com.x += p.pos.x * p.mass;
-        com.y += p.pos.y * p.mass;
-        totalMass += p.mass;
-    });
-    if (totalMass === 0) return { x: 0, y: 0 };
-    return { x: com.x / totalMass, y: com.y / totalMass };
-}
-
-/**
  * Runs one step of the physics simulation.
  */
-export function updatePhysicsBody(body: PhysicsBody, dt: number, targetSkeleton?: Skeleton): void {
+export function updatePhysicsBody(body: PhysicsBody, dt: number): void {
     const dtSq = dt * dt;
 
-    // --- Ground-based balance calculation ---
-    const com = calculateCenterOfMass(body);
-    const leftFoot = body.particles[body.particleMap.get('left.foot')!];
-    const rightFoot = body.particles[body.particleMap.get('right.foot')!];
-    
-    const groundedFeet = [];
-    if (leftFoot && leftFoot.pos.y >= GROUND_PLANE_Y - 1) groundedFeet.push(leftFoot);
-    if (rightFoot && rightFoot.pos.y >= GROUND_PLANE_Y - 1) groundedFeet.push(rightFoot);
-
-    let balanceForce = { x: 0, y: 0 };
-    if (groundedFeet.length > 0) {
-        const supportCenterX = groundedFeet.reduce((acc, foot) => acc + foot.pos.x, 0) / groundedFeet.length;
-        const comError = supportCenterX - com.x;
-
-        const rootParticle = body.particles[body.particleMap.get('root')!];
-        const rootVelocityX = rootParticle.pos.x - rootParticle.prevPos.x;
-
-        const pForce = comError * BALANCE_STIFFNESS;
-        const dForce = -rootVelocityX * BALANCE_DAMPING;
-        balanceForce.x = pForce + dForce;
-    }
-
-    // 1. Apply forces (Gravity, Target Pose, Balance) and integrate
+    // 1. Apply forces (just friction) and integrate
     body.particles.forEach((p) => {
         if (p.mass === 0) return;
 
         const velocity = { x: (p.pos.x - p.prevPos.x) * FRICTION, y: (p.pos.y - p.prevPos.y) * FRICTION };
         p.prevPos = { ...p.pos };
 
-        let accel = { x: GRAVITY.x, y: GRAVITY.y };
-
-        // Apply balancing force to the core of the body to shift weight
-        if (p.id === 'root' || p.id === 'waist' || p.id === 'torso') {
-            accel.x += balanceForce.x / p.mass;
-        }
-
-        if (targetSkeleton) {
-            const targetPos = targetSkeleton.joints[p.id];
-            if (targetPos) {
-                const springForce = { x: (targetPos.x - p.pos.x) * STIFFNESS, y: (targetPos.y - p.pos.y) * STIFFNESS };
-                const dampingForce = { x: -velocity.x * DAMPING, y: -velocity.y * DAMPING };
-                const totalForce = { x: springForce.x + dampingForce.x, y: springForce.y + dampingForce.y };
-                accel.x += totalForce.x / p.mass;
-                accel.y += totalForce.y / p.mass;
-            }
-        }
+        // No external forces like gravity or AI, just simple Verlet integration
+        const accel = { x: 0, y: 0 };
 
         p.pos.x += velocity.x + accel.x * dtSq;
         p.pos.y += velocity.y + accel.y * dtSq;
@@ -163,21 +102,74 @@ export function updatePhysicsBody(body: PhysicsBody, dt: number, targetSkeleton?
         });
     }
 
-    // 3. Handle collisions
-    body.particles.forEach(p => {
-        if (p.pos.y > GROUND_PLANE_Y) {
-            const vel = { x: p.pos.x - p.prevPos.x, y: p.pos.y - p.prevPos.y };
-            p.pos.y = GROUND_PLANE_Y;
-            p.prevPos.y = p.pos.y + vel.y * 0.1;
+    // 3. Apply rotational damping for balance
+    const coreKeys = ['root', 'torso', 'waist'];
+    const coreParticles = coreKeys.map(k => {
+        const index = body.particleMap.get(k);
+        return index !== undefined ? body.particles[index] : null;
+    }).filter(p => p !== null) as PhysicsParticle[];
 
-            if (p.id.includes('foot')) {
-                p.prevPos.x = p.pos.x;
-            } else {
-                p.prevPos.x = p.pos.x - vel.x * GROUND_FRICTION;
-            }
+    if (coreParticles.length > 1) {
+        const com = { x: 0, y: 0 };
+        const comPrev = { x: 0, y: 0 };
+        let totalMass = 0;
+        
+        coreParticles.forEach(p => {
+            com.x += p.pos.x * p.mass;
+            com.y += p.pos.y * p.mass;
+            comPrev.x += p.prevPos.x * p.mass;
+            comPrev.y += p.prevPos.y * p.mass;
+            totalMass += p.mass;
+        });
+
+        com.x /= totalMass; com.y /= totalMass;
+        comPrev.x /= totalMass; comPrev.y /= totalMass;
+        
+        const ROTATIONAL_DAMPING = 0.98; // a value slightly less than 1 to reduce spin
+
+        coreParticles.forEach(p => {
+            const r = { x: p.pos.x - com.x, y: p.pos.y - com.y };
+            const rPrev = { x: p.prevPos.x - comPrev.x, y: p.prevPos.y - comPrev.y };
+            const vel_tangential = { x: r.x - rPrev.x, y: r.y - rPrev.y };
+            const new_vel_tangential = { x: vel_tangential.x * ROTATIONAL_DAMPING, y: vel_tangential.y * ROTATIONAL_DAMPING };
+            const delta_vel = { x: new_vel_tangential.x - vel_tangential.x, y: new_vel_tangential.y - vel_tangential.y };
+            p.pos.x += delta_vel.x;
+            p.pos.y += delta_vel.y;
+        });
+    }
+
+    // 4. Handle collisions with boundaries
+    const PARTICLE_RADIUS = 5; // A small radius for each physics particle to prevent clipping
+    const GROUND_Y_PHYSICS = GROUND_Y - PARTICLE_RADIUS;
+    body.particles.forEach(p => {
+        const vel = { x: p.pos.x - p.prevPos.x, y: p.pos.y - p.prevPos.y };
+
+        // Bottom wall
+        if (p.pos.y > H - PARTICLE_RADIUS) {
+            p.pos.y = H - PARTICLE_RADIUS;
+            p.prevPos.y = p.pos.y + vel.y * BOUNCE_FACTOR;
         }
-        if (p.pos.x < 10) p.pos.x = 10;
-        if (p.pos.x > W - 10) p.pos.x = W - 10;
+        // Top wall
+        if (p.pos.y < PARTICLE_RADIUS) {
+            p.pos.y = PARTICLE_RADIUS;
+            p.prevPos.y = p.pos.y + vel.y * BOUNCE_FACTOR;
+        }
+        // Right wall
+        if (p.pos.x > W - PARTICLE_RADIUS) {
+            p.pos.x = W - PARTICLE_RADIUS;
+            p.prevPos.x = p.pos.x + vel.x * BOUNCE_FACTOR;
+        }
+        // Left wall
+        if (p.pos.x < PARTICLE_RADIUS) {
+            p.pos.x = PARTICLE_RADIUS;
+            p.prevPos.x = p.pos.x + vel.x * BOUNCE_FACTOR;
+        }
+
+        // Ground collision for feet
+        if (p.id.includes('foot') && p.pos.y > GROUND_Y_PHYSICS) {
+            p.pos.y = GROUND_Y_PHYSICS;
+            p.prevPos.y = p.pos.y + vel.y * BOUNCE_FACTOR;
+        }
     });
 }
 
@@ -232,11 +224,10 @@ export function extractPoseFromPhysicsBody(body: PhysicsBody, initialPose: PoseD
         newPose.groundTilt = groundAngle;
         worldAngles.set('root', groundAngle);
         
+        // The offset now tracks the root particle's position relative to the
+        // center of the canvas, making the camera follow the floating puppet.
         newPose.offset.x = rootPos.x - (W / 2);
-        
-        // Recalculate offset.y based on the new relationship between root and ground base
-        const groundBaseYOffset = WAIST_HEIGHT + L_THIGH + L_SHIN;
-        newPose.offset.y = (rootPos.y + groundBaseYOffset) - 650;
+        newPose.offset.y = rootPos.y - (H / 2);
         
         calculateAngles('root', groundAngle);
     }

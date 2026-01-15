@@ -3,6 +3,7 @@ import type { PoseData, Point, BoneSegment, Skeleton } from './types';
 // --- Constants ---
 export const W = 800;
 export const H = 800;
+export const GROUND_Y = 650;
 
 // --- 8-Head Proportions ---
 // The puppet is scaled to fit within the 800px canvas height.
@@ -69,9 +70,9 @@ export function getDefaultPose(): PoseData {
     torso: 0,
     waist: 0,
     head: 0,
-    // Vitruvian-style T-Pose with splayed legs
-    left: { shoulder: rad(180), elbow: 0, hand: 0, hip: rad(100), knee: 0, foot: 0 },
-    right: { shoulder: rad(0), elbow: 0, hand: 0, hip: rad(80), knee: 0, foot: 0 }
+    // Classic T-Pose
+    left: { shoulder: rad(180), elbow: 0, hand: 0, hip: rad(90), knee: 0, foot: 0 },
+    right: { shoulder: rad(0), elbow: 0, hand: 0, hip: rad(90), knee: 0, foot: 0 }
   };
 }
 
@@ -93,7 +94,7 @@ export function computeSkeleton(pose: PoseData): Skeleton {
   const groundBaseYOffset = WAIST_HEIGHT + L_THIGH + L_SHIN; // Vertical distance from navel to ankles
   const groundBasePos = {
     x: W / 2, // Locked to the canvas's horizontal center.
-    y: 650 + pose.offset.y
+    y: GROUND_Y + pose.offset.y
   };
   
   // The puppet's anatomical root (navel) is offset above this new ground base.
@@ -174,19 +175,19 @@ export function computeSkeleton(pose: PoseData): Skeleton {
 
     const hAngle = waistAngle + pose[side].hip;
     const kPos = getEndPoint(hPos, hAngle, L_THIGH);
-    storeBone(hKey, hPos, kPos, 44, hAngle - Math.PI / 2);
+    storeBone(hKey, hPos, kPos, 44, hAngle);
 
     const kKey = `${side}.knee`;
     storeJoint(kKey, kPos);
     const kAngle = hAngle + pose[side].knee;
     const fPos = getEndPoint(kPos, kAngle, L_SHIN);
-    storeBone(kKey, kPos, fPos, 32, kAngle - Math.PI / 2);
+    storeBone(kKey, kPos, fPos, 32, kAngle);
 
     const fKey = `${side}.foot`;
     storeJoint(fKey, fPos);
     const fAngle = kAngle + pose[side].foot;
     const footEnd = getEndPoint(fPos, fAngle, L_FOOT);
-    storeBone(fKey, fPos, footEnd, 18, fAngle - Math.PI / 2);
+    storeBone(fKey, fPos, footEnd, 18, fAngle);
   });
 
   return { joints: jointCache, bones: boneCache };

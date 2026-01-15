@@ -1,4 +1,5 @@
 import type { BoneSegment, Point } from '../core/types';
+import { W, GROUND_Y } from '../core/kinematics';
 
 // --- Theme & constants ---
 const SELECTION_COLOR = '#E025A8'; // Magenta for "Aim" mode highlight
@@ -10,11 +11,11 @@ const imageCache: { [src: string]: HTMLImageElement } = {};
 
 // --- New part-specific color palette ---
 const PALETTE = {
-  GROUND: '#007AFF', // Blue for the new ground base
+  GROUND: '#FF3B30', // Red for the new ground guide line
   HEAD: '#A8A8A8',
   NECK: '#777777',
-  TORSO: '#888888',
-  WAIST: '#606060',
+  TORSO: '#1A1A1A',
+  WAIST: '#1A1A1A',
   THIGH: '#1A1A1A',
   UPPER_ARM: '#1A1A1A', // Bicep
   SHIN: '#808080',
@@ -44,9 +45,6 @@ const pathGround = (ctx: CanvasRenderingContext2D) => {
   ctx.lineTo(size, 0);
   ctx.moveTo(0, -size);
   ctx.lineTo(0, size);
-  ctx.lineWidth = 8;
-  ctx.lineCap = 'round';
-  ctx.stroke();
 };
 const pathHead = (ctx: CanvasRenderingContext2D) => {
   ctx.beginPath();
@@ -104,30 +102,30 @@ const pathHand = (ctx: CanvasRenderingContext2D) => {
 };
 const pathThigh = (ctx: CanvasRenderingContext2D) => {
   ctx.beginPath();
-  // Scaled to 112px long
+  // Scaled to 112px long, drawn horizontally
   ctx.moveTo(0, 0);
-  ctx.quadraticCurveTo(-15, 36.75, -15, 74.375);
-  ctx.lineTo(0, 112);
-  ctx.lineTo(15, 74.375);
-  ctx.quadraticCurveTo(15, 36.75, 0, 0);
+  ctx.quadraticCurveTo(37, -18, 74, -18);
+  ctx.lineTo(112, 0);
+  ctx.lineTo(74, 18);
+  ctx.quadraticCurveTo(37, 18, 0, 0);
   ctx.closePath();
 };
 const pathShin = (ctx: CanvasRenderingContext2D) => {
   ctx.beginPath();
-  // Scaled to 112px long
+  // Scaled to 112px long, drawn horizontally
   ctx.moveTo(0, 0);
-  ctx.quadraticCurveTo(-11, 36.75, -11, 74.375);
-  ctx.lineTo(0, 112);
-  ctx.lineTo(11, 74.375);
-  ctx.quadraticCurveTo(11, 36.75, 0, 0);
+  ctx.quadraticCurveTo(37, -13, 74, -13);
+  ctx.lineTo(112, 0);
+  ctx.lineTo(74, 13);
+  ctx.quadraticCurveTo(37, 13, 0, 0);
   ctx.closePath();
 };
 const pathFoot = (ctx: CanvasRenderingContext2D) => {
   ctx.beginPath();
-  // Scaled to 48px long
-  ctx.moveTo(-8, 0);
-  ctx.lineTo(8, 0);
-  ctx.lineTo(0, 48);
+  // Scaled to 48px long, pointing right
+  ctx.moveTo(0, -8);
+  ctx.lineTo(0, 8);
+  ctx.lineTo(48, 0);
   ctx.closePath();
 };
 
@@ -150,20 +148,14 @@ const drawSelectionHighlight = (ctx: CanvasRenderingContext2D, bone: BoneSegment
   ctx.translate(bone.start.x, bone.start.y);
   ctx.rotate(bone.angle);
   
-  if (bone.key.includes('thigh') || bone.key.includes('shin') || bone.key.includes('foot')) {
-    ctx.translate(0, 1);
-  } else if (bone.key.includes('arm') || bone.key.includes('forearm') || bone.key.includes('hand')) {
+  // Apply same small offsets as drawing
+  if (bone.key.includes('shoulder') || bone.key.includes('elbow') || bone.key.includes('hand') || bone.key.includes('hip') || bone.key.includes('knee') || bone.key.includes('foot')) {
     ctx.translate(1, 0);
   } else if (bone.key === 'head') {
     ctx.translate(0, -1);
   }
   
-  if (bone.key === 'ground') {
-    pathGround(ctx);
-  } else {
-    pathFn(ctx);
-  }
-
+  pathFn(ctx);
 
   ctx.strokeStyle = SELECTION_COLOR;
   ctx.lineWidth = bone.key === 'ground' ? 20 : 12;
@@ -205,29 +197,36 @@ const drawImageAsset = (ctx: CanvasRenderingContext2D, bone: BoneSegment, assetU
 
 const drawCustomPart = (ctx: CanvasRenderingContext2D, bone: BoneSegment) => {
   const pathFn = PATH_MAP[bone.key];
-  if (!pathFn) return;
+  if (!pathFn && bone.key !== 'ground') return;
 
   ctx.save();
-  ctx.translate(bone.start.x, bone.start.y);
+  const yPos = bone.key === 'ground' ? GROUND_Y : bone.start.y;
+  ctx.translate(bone.start.x, yPos);
   ctx.rotate(bone.angle);
 
   if (bone.key === 'ground') {
+      ctx.beginPath();
+      // Ground pivot is at canvas center horizontally. The line spans the full width.
+      // We are in the bone's local space, so we draw relative to its pivot (0,0).
+      ctx.moveTo(-W / 2, 0);
+      ctx.lineTo(W / 2, 0);
       ctx.strokeStyle = getColor(bone.key);
-      pathGround(ctx);
+      ctx.lineWidth = 2; // Make it slightly thicker than the grid
+      ctx.stroke();
+
       ctx.restore();
       return;
   }
 
   // Apply small offsets to match original spec
-  if (bone.key.includes('thigh') || bone.key.includes('shin') || bone.key.includes('foot')) {
-    ctx.translate(0, 1);
-  } else if (bone.key === 'left.shoulder' || bone.key === 'right.shoulder' || bone.key.includes('elbow') || bone.key.includes('hand')) {
+  if (bone.key.includes('shoulder') || bone.key.includes('elbow') || bone.key.includes('hand') || bone.key.includes('hip') || bone.key.includes('knee') || bone.key.includes('foot')) {
+    // All limbs are horizontal now
     ctx.translate(1, 0);
   } else if (bone.key === 'head') {
     ctx.translate(0, -1);
   }
 
-  pathFn(ctx);
+  pathFn!(ctx);
   ctx.fillStyle = getColor(bone.key);
   ctx.fill();
 

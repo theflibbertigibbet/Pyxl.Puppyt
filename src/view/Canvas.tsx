@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, forwardRef, useImperativeHandle, useCallback, useLayoutEffect } from 'react';
-import type { PoseData, Point, BoneSegment, Skeleton } from '../core/types';
-import { computeSkeleton, getParentWorldAngle, W, H, jointConstraints, clampAngle } from '../core/kinematics';
+import type { PoseData, Point, BoneSegment, Skeleton, TargetObject } from '../core/types';
+import { computeSkeleton, getParentWorldAngle, W, H, jointConstraints, clampAngle, getDefaultPose, GROUND_Y } from '../core/kinematics';
 import { solveFabrik } from '../core/ik';
 import { drawPart, drawJoints } from './drawing';
 import { constrainPoseToBounds } from '../utils';
@@ -12,8 +12,6 @@ export interface CanvasHandle {
 interface CanvasProps {
   pose: PoseData;
   onPoseCommit: (pose: PoseData) => void;
-  prevPose?: PoseData;
-  nextPose?: PoseData;
   assets?: { [key: string]: string | null };
   selectedPartKey: string | null;
   onSelectPart: (key: string) => void;
@@ -51,7 +49,7 @@ const isClose = (a: any, b: any, threshold = 0.001): boolean => { if (typeof a =
 function distToSegment(p: Point, v: Point, w: Point): number { const l2 = (v.x - w.x) ** 2 + (v.y - w.y) ** 2; if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y); let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2; t = Math.max(0, Math.min(1, t)); const proj = { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) }; return Math.hypot(p.x - proj.x, p.y - proj.y); }
 
 
-export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommit, prevPose, nextPose, assets, selectedPartKey, onSelectPart, onDeselect }, ref) => {
+export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommit, assets, selectedPartKey, onSelectPart, onDeselect }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -65,6 +63,20 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommi
   const controlledJointRef = useRef<string | null>(null);
   const initialPoseRef = useRef<PoseData | null>(null);
   const initialMousePosRef = useRef<Point>({x: 0, y: 0});
+  
+  const staticShoulderYRef = useRef<number | null>(null);
+  const staticNavelYRef = useRef<number | null>(null);
+  if (staticShoulderYRef.current === null || staticNavelYRef.current === null) {
+      const defaultPose = getDefaultPose();
+      // Calculate skeleton with zero offset to get the static initial position
+      const staticSkeleton = computeSkeleton({ ...defaultPose, offset: { x: 0, y: 0 } });
+      if (staticShoulderYRef.current === null && staticSkeleton.joints['torso']) {
+          staticShoulderYRef.current = staticSkeleton.joints['torso'].y;
+      }
+      if (staticNavelYRef.current === null && staticSkeleton.joints['root']) {
+          staticNavelYRef.current = staticSkeleton.joints['root'].y;
+      }
+  }
 
   useLayoutEffect(() => {
     const wrapper = wrapperRef.current;
@@ -116,6 +128,48 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommi
         for (let y = 0; y <= H; y += 50) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
     }
 
+    const mainSkeleton = computeSkeleton(isExport ? pose : displayedPose);
+
+    // Draw the thin red navel horizon line (Static)
+    if (!isExport) {
+        if (staticNavelYRef.current !== null) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(0, staticNavelYRef.current);
+            ctx.lineTo(W, staticNavelYRef.current);
+            ctx.strokeStyle = PIN_COLOR;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    // Draw the thin red shoulder/arm horizon line (Static)
+    if (!isExport) {
+        if (staticShoulderYRef.current !== null) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(0, staticShoulderYRef.current);
+            ctx.lineTo(W, staticShoulderYRef.current);
+            ctx.strokeStyle = PIN_COLOR;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    // Draw the thin red vertical center line
+    if (!isExport) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(W / 2, 0);
+        ctx.lineTo(W / 2, H);
+        ctx.strokeStyle = PIN_COLOR;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+    }
+
     const drawSkeleton = (skel: Skeleton, currentAssets?: typeof assets, highlightKey?: string | null) => {
         const order = [
             'ground',
@@ -133,14 +187,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommi
         });
     };
 
-    if (!isExport) {
-        ctx.globalAlpha = 0.15;
-        if (prevPose) drawSkeleton(computeSkeleton(prevPose), assets);
-        if (nextPose) drawSkeleton(computeSkeleton(nextPose), assets);
-        ctx.globalAlpha = 1.0;
-    }
-
-    const mainSkeleton = computeSkeleton(isExport ? pose : displayedPose);
     drawSkeleton(mainSkeleton, assets, isExport ? null : selectedPartKey);
 
     if (!isExport) {
@@ -149,7 +195,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommi
             ctx.fillStyle = PIN_COLOR; ctx.beginPath(); ctx.arc(activePivot.x, activePivot.y, 6, 0, 2 * Math.PI); ctx.fill();
         }
     }
-  }, [displayedPose, pose, assets, selectedPartKey, activePivot, prevPose, nextPose]);
+  }, [displayedPose, pose, assets, selectedPartKey, activePivot]);
 
   useEffect(() => {
     const canvas = canvasRef.current!, ctx = canvas.getContext('2d')!;
@@ -192,7 +238,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommi
 
     skeleton.bones.forEach(bone => {
         const dist = bone.key === 'ground' 
-            ? Math.hypot(pos.x - bone.start.x, pos.y - bone.start.y)
+            ? Math.hypot(pos.x - bone.start.x, pos.y - GROUND_Y) // Use static Y for hit test
             : distToSegment(pos, bone.start, bone.end);
             
         if (dist < bone.width / 2 + 16 && dist < minDistance) {
@@ -303,11 +349,17 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommi
   };
 
   const handleRotate = (skeleton: Skeleton, snappedPos: Point, useSnap: boolean, bypassConstraints: boolean) => {
-    if (!controlledJointRef.current) return;
-    const jointToRotate = controlledJointRef.current;
+    if (!draggedPartKey) return;
+
+    // The action is determined by the BONE that was clicked.
+    const action = boneToControlledAction[draggedPartKey as keyof typeof boneToControlledAction];
+    if (!action || action.type !== 'rotate') return;
+
+    // The joint to rotate is specified in the action.
+    const jointToRotate = action.joint;
     
-    const action = boneToControlledAction[jointToRotate as keyof typeof boneToControlledAction];
-    const pivotKey = action?.pivot || jointToRotate;
+    // The pivot point for the rotation.
+    const pivotKey = action.pivot || jointToRotate;
     const pivot = skeleton.joints[pivotKey];
 
     if (!pivot) return;
@@ -329,8 +381,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(({ pose, onPoseCommi
     setLocalPose(p => {
         const newPose = JSON.parse(JSON.stringify(p));
         const parts = jointToRotate.split('.');
-        if (parts.length === 2) (newPose as any)[parts[0]][parts[1]] = newLocalAngle; 
-        else (newPose as any)[jointToRotate] = newLocalAngle;
+        if (parts.length === 2) {
+            (newPose as any)[parts[0]][parts[1]] = newLocalAngle; 
+        } else {
+            (newPose as any)[jointToRotate] = newLocalAngle;
+        }
         return newPose;
     });
   };

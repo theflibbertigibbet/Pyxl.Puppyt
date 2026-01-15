@@ -24,30 +24,6 @@ export type PoseData = {
   };
 };
 
-// A single, immutable frame in the animation.
-export type Frame = {
-  id: number;
-  pose: PoseData;
-  assets?: { [key: string]: string | null };
-};
-
-// The sequence of frames. This is the primary subject of the undo/redo history.
-export type Timeline = {
-  frames: Frame[];
-};
-
-// Ephemeral playback state. This is never saved or part of the undo history.
-export type Playhead = {
-  index: number;
-  playing: boolean;
-};
-
-// The complete, top-level state for the application.
-export type State = {
-  timeline: Timeline;
-  playhead: Playhead;
-};
-
 // --- Computed Types for Rendering ---
 
 export type Point = {
@@ -89,4 +65,11 @@ export type PhysicsBody = {
   particles: PhysicsParticle[];
   constraints: PhysicsConstraint[];
   particleMap: Map<string, number>;
+};
+
+// The new interactive object for physics mode
+export type TargetObject = {
+  pos: Point;
+  prevPos: Point;
+  radius: number;
 };
