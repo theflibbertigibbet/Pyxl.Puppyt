@@ -45,31 +45,3 @@ export type Skeleton = {
     joints: { [key: string]: Point };
     bones: BoneSegment[];
 };
-
-// --- Physics Engine Types ---
-
-export type PhysicsParticle = {
-  id: string;
-  pos: Point;
-  prevPos: Point;
-  mass: number;
-};
-
-export type PhysicsConstraint = {
-  particleAIndex: number;
-  particleBIndex: number;
-  restLength: number;
-};
-
-export type PhysicsBody = {
-  particles: PhysicsParticle[];
-  constraints: PhysicsConstraint[];
-  particleMap: Map<string, number>;
-};
-
-// The new interactive object for physics mode
-export type TargetObject = {
-  pos: Point;
-  prevPos: Point;
-  radius: number;
-};

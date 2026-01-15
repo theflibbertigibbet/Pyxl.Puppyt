@@ -44,23 +44,6 @@ export const hierarchy: { [key: string]: { parent: string | null; children: stri
   'right.foot': { parent: 'right.knee', children: [] }
 };
 
-// --- Joint Constraints ---
-export const jointConstraints: { [key: string]: { min: number; max: number } } = {
-  // All joint constraints have been removed to allow for full 360-degree rotation.
-};
-
-/**
- * Clamps an angle to a specified min/max range.
- * Normalizes the angle to be within -PI to PI before clamping.
- */
-export function clampAngle(angle: number, min: number, max: number): number {
-  let normAngle = angle;
-  while (normAngle > Math.PI) normAngle -= 2 * Math.PI;
-  while (normAngle < -Math.PI) normAngle += 2 * Math.PI;
-  return Math.max(min, Math.min(max, normAngle));
-}
-
-
 const rad = (deg: number): number => (deg * Math.PI) / 180;
 
 export function getDefaultPose(): PoseData {
@@ -192,30 +175,3 @@ export function computeSkeleton(pose: PoseData): Skeleton {
 
   return { joints: jointCache, bones: boneCache };
 }
-
-// --- Inverse Kinematics (IK) ---
-
-export const getParentWorldAngle = (key: string, pose: PoseData): number | null => {
-    const parentKey = hierarchy[key]?.parent;
-    if (!parentKey) return 0;
-    if (parentKey === 'ground') return pose.groundTilt;
-    if (parentKey === 'torso') return pose.groundTilt + pose.torso;
-    if (parentKey === 'waist') return pose.groundTilt + pose.waist;
-    if (parentKey === 'root') return pose.groundTilt;
-    const [side, jointName] = parentKey.split('.') as ['left' | 'right', string];
-    if (jointName === 'shoulder') return pose.groundTilt + pose.torso + pose[side].shoulder;
-    if (jointName === 'elbow') return pose.groundTilt + pose.torso + pose[side].shoulder + pose[side].elbow;
-    if (jointName === 'hip') return pose.groundTilt + pose.waist + pose[side].hip;
-    if (jointName === 'knee') return pose.groundTilt + pose.waist + pose[side].hip + pose[side].knee;
-    return null;
-}
-
-export const solveIK = (rootPos: Point, targetPos: Point, l1: number, l2: number): { angle1: number, angle2: number } | null => {
-    const dx = targetPos.x - rootPos.x, dy = targetPos.y - rootPos.y;
-    const distSq = dx * dx + dy * dy, dist = Math.sqrt(distSq);
-    if (dist > l1 + l2) return { angle1: Math.atan2(dy, dx), angle2: 0 };
-    if (dist < Math.abs(l1 - l2)) return null;
-    const a1 = Math.acos((distSq + l1 * l1 - l2 * l2) / (2 * dist * l1));
-    const a2 = Math.acos((l1 * l1 + l2 * l2 - distSq) / (2 * l1 * l2));
-    return { angle1: Math.atan2(dy, dx) - a1, angle2: Math.PI - a2 };
-};

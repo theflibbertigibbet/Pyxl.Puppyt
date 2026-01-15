@@ -4,6 +4,7 @@ import { W, GROUND_Y } from '../core/kinematics';
 // --- Theme & constants ---
 const SELECTION_COLOR = '#E025A8'; // Magenta for "Aim" mode highlight
 const JOINT_FILL_COLOR = '#1A1A1A';
+const PIN_COLOR = '#FF3B30'; // Also used for pinned joints
 const JOINT_RADIUS = 5;
 
 // --- Asset Cache ---
@@ -52,7 +53,14 @@ const pathHead = (ctx: CanvasRenderingContext2D) => {
   ctx.ellipse(0, -32, 19, 32, 0, 0, Math.PI * 2);
 };
 const pathNeck = (ctx: CanvasRenderingContext2D) => {
-  // The neck is now just an invisible joint, so we draw nothing.
+  // The neck is a small collar shape, like the top of a chess pawn.
+  ctx.beginPath();
+  ctx.moveTo(-12, 0); // Start bottom-left, where it meets the torso
+  // Sweeping curve up to the top center
+  ctx.bezierCurveTo(-11, -5, -9, -9, 0, -10);
+  // Symmetrical curve back down to the bottom right
+  ctx.bezierCurveTo(9, -9, 11, -5, 12, 0);
+  ctx.closePath();
 };
 const pathTorso = (ctx: CanvasRenderingContext2D) => {
   ctx.beginPath();
@@ -256,13 +264,21 @@ export const drawPart = (ctx: CanvasRenderingContext2D, bone: BoneSegment, isHig
     drawCustomPart(ctx, bone);
 };
 
-export const drawJoints = (ctx: CanvasRenderingContext2D, joints: { [key: string]: Point }) => {
-    ctx.fillStyle = JOINT_FILL_COLOR;
+export const drawJoints = (ctx: CanvasRenderingContext2D, joints: { [key: string]: Point }, pinnedPoints?: { [key: string]: Point } | null) => {
     for (const key in joints) {
-        if(key === 'head' || key === 'ground') continue;
+        if(key === 'ground') continue;
         const p = joints[key];
+        
+        const isPinned = pinnedPoints && pinnedPoints[key];
+        const isHead = key === 'head';
+
+        ctx.fillStyle = isPinned ? PIN_COLOR : JOINT_FILL_COLOR;
+        const radius = isPinned ? JOINT_RADIUS * 1.5 : JOINT_RADIUS;
+        
+        if (isHead && !isPinned) continue; // Don't draw regular head dot, only pinned one
+
         ctx.beginPath();
-        ctx.arc(p.x, p.y, JOINT_RADIUS, 0, 2 * Math.PI);
+        ctx.arc(p.x, p.y, radius, 0, 2 * Math.PI);
         ctx.fill();
     }
 };
